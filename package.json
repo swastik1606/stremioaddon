@@ -1,0 +1,16 @@
+{
+  "name": "stremio-random-episode",
+  "version": "1.0.0",
+  "description": "Stremio addon that plays a random episode from any TV show",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "stremio-addon-sdk": "^1.6.10",
+    "node-fetch": "^3.3.2"
+  }
+}
