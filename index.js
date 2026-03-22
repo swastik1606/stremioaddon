@@ -5,7 +5,7 @@ const PORT = process.env.PORT || 7000;
 
 const manifest = {
   id: "com.randomep.stremio",
-  version: "1.2.0",
+  version: "1.3.0",
   name: "🎲 Random Episode",
   description: "Pick a show, get a random episode via your existing streaming addons.",
   logo: "https://i.imgur.com/sS4J4Vz.png",
@@ -37,10 +37,6 @@ function posterUrl(path) {
   return path ? `https://image.tmdb.org/t/p/w500${path}` : "https://i.imgur.com/sS4J4Vz.png";
 }
 
-function pick(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-
 function shuffle(arr) {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -55,18 +51,15 @@ async function getImdbId(tmdbId) {
   return data.imdb_id || null;
 }
 
-// Returns N unique random episodes from across all seasons
 async function getRandomEpisodes(tmdbId, count = 10) {
   const show = await tmdb(`/tv/${tmdbId}`);
   const validSeasons = show.seasons.filter(s => s.season_number > 0 && s.episode_count > 0);
   if (!validSeasons.length) return { show, episodes: [] };
 
-  // Fetch all season details in parallel
   const seasonDetails = await Promise.all(
     validSeasons.map(s => tmdb(`/tv/${tmdbId}/season/${s.season_number}`))
   );
 
-  // Flatten all episodes
   const allEpisodes = seasonDetails.flatMap(sd =>
     (sd.episodes || []).map(ep => ({
       season: sd.season_number,
@@ -76,10 +69,11 @@ async function getRandomEpisodes(tmdbId, count = 10) {
     }))
   );
 
-  // Shuffle and take N unique ones
   return { show, episodes: shuffle(allEpisodes).slice(0, count) };
 }
 
+// Catalog: each show ID includes a timestamp bucket (changes every 5 min)
+// so Stremio sees it as a new item and won't serve cached meta
 builder.defineCatalogHandler(async ({ id, extra }) => {
   if (id !== "random-ep-search") return { metas: [] };
   const query = extra && extra.search;
@@ -87,8 +81,12 @@ builder.defineCatalogHandler(async ({ id, extra }) => {
     ? `/search/tv?query=${encodeURIComponent(query)}&page=1`
     : `/tv/popular?page=1`;
   const data = await tmdb(endpoint);
+
+  // Timestamp bucket: changes every 5 minutes, busting Stremio's cache
+  const bucket = Math.floor(Date.now() / (5 * 60 * 1000));
+
   const metas = (data.results || []).slice(0, 20).map(show => ({
-    id: `randomep:${show.id}`,
+    id: `randomep:${show.id}:${bucket}`,
     type: "series",
     name: show.name,
     poster: posterUrl(show.poster_path),
@@ -101,6 +99,7 @@ builder.defineCatalogHandler(async ({ id, extra }) => {
 builder.defineMetaHandler(async ({ type, id }) => {
   if (type !== "series" || !id.startsWith("randomep:")) return { meta: null };
 
+  // ID format: randomep:tmdbId:bucket  (bucket may or may not be present)
   const tmdbId = id.split(":")[1];
 
   const [imdbId, { show, episodes }] = await Promise.all([
@@ -110,8 +109,6 @@ builder.defineMetaHandler(async ({ type, id }) => {
 
   if (!imdbId || !episodes.length) return { meta: null };
 
-  // Each video uses the real IMDB ID format so Torrentio picks it up
-  // Every time the meta is loaded, a fresh shuffle is returned
   const videos = episodes.map((ep, i) => {
     const s = String(ep.season).padStart(2, "0");
     const e = String(ep.episode).padStart(2, "0");
@@ -120,7 +117,7 @@ builder.defineMetaHandler(async ({ type, id }) => {
       title: `🎲 #${i + 1} — S${s}E${e}${ep.name ? ` · ${ep.name}` : ""}`,
       season: ep.season,
       episode: ep.episode,
-      released: new Date(Date.now() - i * 1000).toISOString(), // stagger so they sort correctly
+      released: new Date(Date.now() - i * 1000).toISOString(),
       overview: ep.overview || "",
     };
   });
@@ -134,7 +131,7 @@ builder.defineMetaHandler(async ({ type, id }) => {
       background: show.backdrop_path
         ? `https://image.tmdb.org/t/p/original${show.backdrop_path}`
         : undefined,
-      description: `🎲 ${videos.length} random episodes picked for you. Go back & reopen for a fresh batch!\n\n${show.overview}`,
+      description: `🎲 ${videos.length} random episodes ready. Go back & reopen for a fresh batch!\n\n${show.overview}`,
       releaseInfo: show.first_air_date?.slice(0, 4),
       videos,
     },
@@ -142,4 +139,4 @@ builder.defineMetaHandler(async ({ type, id }) => {
 });
 
 serveHTTP(builder.getInterface(), { port: PORT });
-console.log(`🎲 Random Episode addon v1.2.0 running on port ${PORT}`);
+console.log(`🎲 Random Episode addon v1.3.0 running on port ${PORT}`);
